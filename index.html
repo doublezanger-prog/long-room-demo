@@ -49,6 +49,17 @@
     display: none; box-shadow: 0 4px 14px rgba(0,0,0,0.4);
   }
   #listenBtn.show { display: block; }
+  /* 加载界面 */
+  #loading {
+    position: fixed; inset: 0; z-index: 20; background: #0a0a0a; color: #fff;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 20px;
+  }
+  #loading.hidden { display: none; }
+  #loading .ltitle { font-size: 26px; font-weight: 600; letter-spacing: 0.5px; }
+  #loading .lsub { font-size: 14px; opacity: 0.7; }
+  #loading .lbar { width: 240px; height: 4px; background: rgba(255,255,255,0.15); border-radius: 2px; overflow: hidden; }
+  #loading #lfill { height: 100%; width: 0; background: #ffd060; transition: width 0.2s; }
+  #loading #lpct { font-size: 13px; opacity: 0.6; font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
@@ -58,7 +69,13 @@
 <div id="subtitle"></div>
 <div id="joystick"><div id="stick"></div></div>
 <button id="listenBtn">Listen</button>
-<div id="overlay">
+<div id="loading">
+  <div class="ltitle">The Long Room</div>
+  <div class="lsub">Loading immersive scene…</div>
+  <div class="lbar"><div id="lfill"></div></div>
+  <div id="lpct">0%</div>
+</div>
+<div id="overlay" class="hidden">
   <h2>The Long Room</h2>
   <p>Old Library, Trinity College Dublin — an immersive walkthrough with spatial audio.</p>
   <p id="controlsHelp"></p>
@@ -129,8 +146,43 @@ window.addEventListener("resize", () => {
 });
 
 // ===================== 加载高斯泼溅 =====================
-const longRoom = new SplatMesh({ url: SPLAT_URL });
-scene.add(longRoom);
+// 带进度地下载泼溅文件，再交给 SplatMesh（避免黑屏干等）
+let longRoom;
+(async function loadSplat() {
+  const loadingEl = document.getElementById("loading");
+  const lfill = document.getElementById("lfill");
+  const lpct = document.getElementById("lpct");
+  try {
+    const resp = await fetch(SPLAT_URL);
+    const total = +resp.headers.get("Content-Length") || 0;
+    const reader = resp.body.getReader();
+    let received = 0; const chunks = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value); received += value.length;
+      if (total) {
+        const p = Math.min(1, received / total);
+        lfill.style.width = (p * 100).toFixed(0) + "%";
+        lpct.textContent = (p * 100).toFixed(0) + "%";
+      } else {
+        lpct.textContent = (received / 1048576).toFixed(1) + " MB";
+      }
+    }
+    const blobUrl = URL.createObjectURL(new Blob(chunks));
+    longRoom = new SplatMesh({ url: blobUrl });
+    scene.add(longRoom);
+    if (longRoom.initialized && longRoom.initialized.then) {
+      await longRoom.initialized;
+    }
+    camera.position.copy(START_POS);
+    applyLook();
+    loadingEl.classList.add("hidden");
+    document.getElementById("overlay").classList.remove("hidden");
+  } catch (err) {
+    lpct.textContent = "Load error: " + err.message;
+  }
+})();
 
 // ===================== 相机朝向：统一 yaw/pitch 模型 =====================
 let yaw = 0, pitch = 0;
