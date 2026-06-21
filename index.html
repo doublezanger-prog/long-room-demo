@@ -1,43 +1,68 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Long Room Demo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Long Room — Trinity College Dublin</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: sans-serif; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: -apple-system, Segoe UI, sans-serif; touch-action: none; }
   #app { position: fixed; inset: 0; }
   #overlay {
     position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-    background: rgba(0,0,0,0.6); color: #fff; z-index: 10; cursor: pointer;
-    text-align: center; flex-direction: column; gap: 10px;
+    background: rgba(0,0,0,0.65); color: #fff; z-index: 10; cursor: pointer;
+    text-align: center; flex-direction: column; gap: 12px; padding: 20px;
   }
+  #overlay h2 { font-weight: 600; font-size: 26px; margin: 0; letter-spacing: 0.5px; }
+  #overlay p { margin: 0; font-size: 15px; opacity: 0.85; max-width: 520px; line-height: 1.5; }
+  #overlay .cta { margin-top: 6px; font-size: 13px; opacity: 0.6; }
   #overlay.hidden { display: none; }
   #crosshair {
     position: fixed; top: 50%; left: 50%; width: 6px; height: 6px;
     margin: -3px; border-radius: 50%; background: rgba(255,255,255,0.8);
     z-index: 5; pointer-events: none;
   }
+  #crosshair.hidden { display: none; }
   #hint, #subtitle {
     position: fixed; left: 50%; transform: translateX(-50%);
     color: #fff; background: rgba(0,0,0,0.55); padding: 8px 16px;
-    border-radius: 6px; font-size: 16px; z-index: 5; max-width: 80%;
-    text-align: center; pointer-events: none;
+    border-radius: 8px; font-size: 16px; z-index: 5; max-width: 84%;
+    text-align: center; pointer-events: none; box-sizing: border-box;
   }
-  #hint { bottom: 60px; }
-  #subtitle { bottom: 60px; display: none; line-height: 1.5; }
+  #hint { bottom: 84px; }
+  #subtitle { bottom: 84px; display: none; line-height: 1.5; }
   #subtitle.show { display: block; }
+  /* 手机：左侧虚拟摇杆 + 右侧“listen”按钮 */
+  #joystick {
+    position: fixed; left: 26px; bottom: 26px; width: 120px; height: 120px;
+    border-radius: 50%; background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.25);
+    z-index: 6; display: none; touch-action: none;
+  }
+  #joystick.show { display: block; }
+  #stick {
+    position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px;
+    border-radius: 50%; background: rgba(255,255,255,0.35);
+  }
+  #listenBtn {
+    position: fixed; right: 26px; bottom: 50px; z-index: 7;
+    padding: 14px 22px; border-radius: 30px; border: none;
+    background: rgba(255,208,96,0.92); color: #2a1c00; font-size: 16px; font-weight: 600;
+    display: none; box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+  }
+  #listenBtn.show { display: block; }
 </style>
 </head>
 <body>
 <div id="app"></div>
-<div id="crosshair"></div>
+<div id="crosshair" class="hidden"></div>
 <div id="hint"></div>
 <div id="subtitle"></div>
+<div id="joystick"><div id="stick"></div></div>
+<button id="listenBtn">Listen</button>
 <div id="overlay">
-  <h2>Long Room — Demo</h2>
-  <p>点击进入 · WASD 移动 · 鼠标看视角 · 走近光点按 E 触发故事</p>
-  <p style="font-size:13px;opacity:0.7">Click to enter</p>
+  <h2>The Long Room</h2>
+  <p>Old Library, Trinity College Dublin — an immersive walkthrough with spatial audio.</p>
+  <p id="controlsHelp"></p>
+  <p class="cta" id="ctaText">Click to enter</p>
 </div>
 
 <script type="importmap">
@@ -45,28 +70,45 @@
   "imports": {
     "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
     "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
-    "@sparkjsdev/spark": "https://cdn.jsdelivr.net/npm/@sparkjsdev/spark@latest/dist/spark.module.js"
+    "@sparkjsdev/spark": "https://cdn.jsdelivr.net/npm/@sparkjsdev/spark@2.1.0/dist/spark.module.js"
   }
 }
 </script>
 
 <script type="module">
 import * as THREE from "three";
-import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
 
-// ----------------- 可调常量 -----------------
-const SPLAT_URL = "long-room.spz";   // 你的 spz 文件
-const SPLAT_FLIP = { rotateX: 0, scale: 1.0 }; // 若上下颠倒/朝向不对，调这里
-const START_POS = new THREE.Vector3(0.04, 1.20, 1.64);  // 出生点（用户选定）
-const LOOK_AT = new THREE.Vector3(0.07, 1.26, 0.64);    // 初始朝向（用户选定）
-const HOTSPOT_POS = new THREE.Vector3(-1.04, 0.45, -3.99);  // 《凯尔经》热点位置（用户选定）
-const MOVE_SPEED = 2.5; // m/s
-const IR_URL = "ir.wav";       // 可选：放一段大厅脉冲响应
-const NARRATION_URL = "narration.wav"; // 英文旁白音频（走空间定位 + 混响链路）
+// ===================== 可调常量 =====================
+const SPLAT_URL = "long-room.spz";
+const START_POS = new THREE.Vector3(0.04, 1.20, 1.64);  // 出生点
+const LOOK_AT  = new THREE.Vector3(0.07, 1.26, 0.64);   // 初始朝向
+const MOVE_SPEED = 2.2;
+const IR_URL = "ir.wav";
 
-// ----------------- 场景基础 -----------------
+// 活动范围限制（避免走到 Marble 失真区）。x/z 方框边界，y 固定。
+let BOUNDS = { xMin: -1.97, xMax: 1.84, zMin: -12.59, zMax: 7.67 }; // 用户记录的活动范围
+
+// 两个交互热点
+const HOTSPOTS = [
+  {
+    name: "Book of Kells",
+    pos: new THREE.Vector3(-1.04, 0.45, -3.99),
+    audio: "narration.wav",
+    range: 2.5,
+    script: [
+      { text: "Welcome to the Long Room of the Old Library at Trinity College Dublin.", weight: 1.0 },
+      { text: "Built between 1712 and 1732, this hall is nearly 65 metres long, and houses around 200,000 of the library's oldest books.", weight: 1.9 },
+      { text: "At its heart lies the Book of Kells — a lavishly illuminated manuscript of the four Gospels, created by monks around the year 800.", weight: 1.9 },
+      { text: "It is regarded as one of Ireland's greatest cultural treasures, and a masterpiece of insular illumination.", weight: 1.4 },
+    ],
+  },
+];
+
+// ===================== 设备检测 =====================
+const isTouch = matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
+
+// ===================== 场景基础 =====================
 const app = document.getElementById("app");
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -74,25 +116,11 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-
-// Spark 渲染器：必须加入场景，否则泼溅不渲染
 const spark = new SparkRenderer({ renderer });
 scene.add(spark);
+
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 2000);
 camera.position.copy(START_POS);
-
-// 调试模式：用 OrbitControls 自由缩放/旋转，找到模型所在的尺度和位置
-const DEBUG_ORBIT = false;
-let orbitControls = null;
-if (DEBUG_ORBIT) {
-  orbitControls = new OrbitControls(camera, renderer.domElement);
-  orbitControls.minDistance = 0.1;
-  orbitControls.maxDistance = 500;
-  orbitControls.target.set(0, 0, 0);
-  camera.position.set(0, 0, 8);
-  orbitControls.update();
-  document.getElementById("overlay").classList.add("hidden");
-}
 
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -100,200 +128,196 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// ----------------- 加载高斯泼溅 -----------------
+// ===================== 加载高斯泼溅 =====================
 const longRoom = new SplatMesh({ url: SPLAT_URL });
-longRoom.quaternion.setFromEuler(new THREE.Euler(SPLAT_FLIP.rotateX, 0, 0));
-longRoom.scale.setScalar(SPLAT_FLIP.scale);
 scene.add(longRoom);
 
-const debugEl = document.createElement("div");
-debugEl.style.position = "fixed";
-debugEl.style.top = "10px";
-debugEl.style.left = "10px";
-debugEl.style.color = "#0f0";
-debugEl.style.font = "12px monospace";
-debugEl.style.background = "rgba(0,0,0,0.5)";
-debugEl.style.padding = "6px";
-debugEl.style.zIndex = "20";
-debugEl.style.whiteSpace = "pre";
-debugEl.textContent = "Loading splat...";
-const SHOW_DEBUG = false; // 设为 true 可显示加载调试信息
-if (SHOW_DEBUG) document.body.appendChild(debugEl);
+// ===================== 相机朝向：统一 yaw/pitch 模型 =====================
+let yaw = 0, pitch = 0;
+const PITCH_LIMIT = Math.PI / 2 - 0.05;
+(function initLook() {
+  const d = LOOK_AT.clone().sub(START_POS).normalize();
+  yaw = Math.atan2(-d.x, -d.z);
+  pitch = Math.asin(THREE.MathUtils.clamp(d.y, -1, 1));
+})();
+const _euler = new THREE.Euler(0, 0, 0, "YXZ");
+function applyLook() {
+  _euler.set(pitch, yaw, 0);
+  camera.quaternion.setFromEuler(_euler);
+}
+applyLook();
 
-window.addEventListener("error", (e) => {
-  debugEl.textContent += "\nERROR: " + e.message;
-});
+// ===================== 输入：移动向量 + 视角增量 =====================
+// moveInput: z 正=前进，x 正=右；键盘和摇杆都写入它
+const keyMove = { f: 0, b: 0, l: 0, r: 0 };
+const joyMove = { x: 0, z: 0 };
+let started = false;
 
-longRoom.initialized.then(() => {
-  const ps = longRoom.packedSplats;
-  const num = ps ? ps.numSplats : "?";
-
-  // 打印 packedSplats 上的可用字段名，方便定位数据结构
-  const psKeys = ps ? Object.keys(ps).join(",") : "none";
-  const lrKeys = Object.keys(longRoom).join(",");
-
-  debugEl.textContent =
-    "numSplats=" + num + "\n" +
-    "packedSplats keys: " + psKeys + "\n" +
-    "splatMesh keys: " + lrKeys;
-
-  // 多等几帧，再用标准 Box3 算包围盒（部分渲染器在首次渲染后才建立几何体）
-  let tries = 0;
-  function tryBox() {
-    tries++;
-    const box = new THREE.Box3();
-    try {
-      box.setFromObject(longRoom, true);
-    } catch (e) {}
-    const size = new THREE.Vector3();
-    const center = new THREE.Vector3();
-    box.getSize(size);
-    box.getCenter(center);
-
-    if (isFinite(size.length()) && size.length() > 0.001) {
-      debugEl.textContent +=
-        "\n[try " + tries + "] center: " + center.x.toFixed(2)+","+center.y.toFixed(2)+","+center.z.toFixed(2) +
-        " size: " + size.x.toFixed(2)+","+size.y.toFixed(2)+","+size.z.toFixed(2);
-
-      const dist = Math.max(size.x, size.y, size.z, 1) * 1.2;
-      camera.far = Math.max(dist * 4, 100);
-      camera.updateProjectionMatrix();
-      camera.position.set(center.x, center.y, center.z + dist);
-      camera.lookAt(center);
-      HOTSPOT_POS.copy(center);
-      hotspot.position.copy(HOTSPOT_POS);
-    } else if (tries < 30) {
-      requestAnimationFrame(tryBox);
-    } else {
-      // 包围盒算不出（Spark用dyno几何体），直接用手设的出生点
-      camera.position.copy(START_POS);
-      camera.lookAt(LOOK_AT);
-    }
-  }
-  tryBox();
-}).catch((err) => {
-  debugEl.textContent = "Splat load error: " + err;
-});
-
-// ----------------- 第一人称控制 -----------------
-const controls = new PointerLockControls(camera, renderer.domElement);
 const overlay = document.getElementById("overlay");
+const crosshair = document.getElementById("crosshair");
+const joystickEl = document.getElementById("joystick");
+const stickEl = document.getElementById("stick");
+const listenBtn = document.getElementById("listenBtn");
+const hint = document.getElementById("hint");
+const subtitle = document.getElementById("subtitle");
 
-overlay.addEventListener("click", () => controls.lock());
-controls.addEventListener("lock", () => overlay.classList.add("hidden"));
-controls.addEventListener("unlock", () => overlay.classList.remove("hidden"));
-// 新版 PointerLockControls 直接控制相机，相机已在场景中无需再 add
+// 进入提示文案
+document.getElementById("controlsHelp").textContent = isTouch
+  ? "Left side to move · Right side to look · Tap a glowing point to listen"
+  : "WASD to move · Mouse to look · Walk up to a glowing point and press E";
+document.getElementById("ctaText").textContent = isTouch ? "Tap to enter" : "Click to enter";
 
-const move = { forward: false, backward: false, left: false, right: false };
+function enter() {
+  if (started) return;
+  started = true;
+  overlay.classList.add("hidden");
+  initAudio();
+  if (isTouch) {
+    joystickEl.classList.add("show");
+  } else {
+    crosshair.classList.remove("hidden");
+    renderer.domElement.requestPointerLock();
+  }
+}
+overlay.addEventListener("click", enter);
+
+// ---- 桌面：键盘移动 ----
 document.addEventListener("keydown", (e) => {
   switch (e.code) {
-    case "KeyW": move.forward = true; break;
-    case "KeyS": move.backward = true; break;
-    case "KeyA": move.left = true; break;
-    case "KeyD": move.right = true; break;
-    case "KeyE": tryTriggerHotspot(); break;
-    case "KeyP": placeHotspotAhead(); break;   // 临时定位工具
-    case "KeyO": recordSpawn(); break;          // 记录当前位置/朝向为出生点
-    case "KeyQ": hotspotAheadDist = Math.max(0.3, hotspotAheadDist - 0.3); placeHotspotAhead(); break; // 拉近
-    case "KeyR": hotspotAheadDist += 0.3; placeHotspotAhead(); break; // 推远
+    case "KeyW": keyMove.f = 1; break;
+    case "KeyS": keyMove.b = 1; break;
+    case "KeyA": keyMove.l = 1; break;
+    case "KeyD": keyMove.r = 1; break;
+    case "KeyE": triggerNearest(); break;
+    case "KeyB": recordBound(); break;   // 记录活动边界角点
+    case "KeyN": boundPts = []; coordEl.textContent = "bounds reset"; break; // 清空重记
+    case "KeyO": recordSpawn(); break;
   }
 });
-
-// ---- 临时定位工具：把热点放到相机正前方的落点，并显示坐标 ----
-let hotspotAheadDist = 2.0;
-const coordEl = document.createElement("div");
-coordEl.style.cssText = "position:fixed;top:10px;left:10px;color:#0f0;font:13px monospace;background:rgba(0,0,0,0.6);padding:6px 10px;z-index:30;white-space:pre;";
-coordEl.textContent = "按 P 放置热点 | Q 拉近 R 推远";
-const SHOW_TOOLS = false; // 发布时隐藏临时定位工具的屏显（P/O/Q/R 键仍可用）
-if (SHOW_TOOLS) document.body.appendChild(coordEl);
-
-function recordSpawn() {
-  const dir = new THREE.Vector3();
-  camera.getWorldDirection(dir);
-  const p = camera.position;
-  const look = p.clone().add(dir);
-  coordEl.textContent =
-    "START_POS = (" + p.x.toFixed(2) + ", " + p.y.toFixed(2) + ", " + p.z.toFixed(2) + ")\n" +
-    "LOOK_AT  = (" + look.x.toFixed(2) + ", " + look.y.toFixed(2) + ", " + look.z.toFixed(2) + ")\n" +
-    "（按 O 记录出生点）";
-}
-
-function placeHotspotAhead() {
-  const dir = new THREE.Vector3();
-  camera.getWorldDirection(dir);
-  const p = camera.position.clone().addScaledVector(dir, hotspotAheadDist);
-  HOTSPOT_POS.copy(p);
-  hotspot.position.copy(HOTSPOT_POS);
-  coordEl.textContent =
-    "HOTSPOT_POS = (" + p.x.toFixed(2) + ", " + p.y.toFixed(2) + ", " + p.z.toFixed(2) + ")\n" +
-    "dist=" + hotspotAheadDist.toFixed(1) + "  | P放置 Q拉近 R推远";
-}
 document.addEventListener("keyup", (e) => {
   switch (e.code) {
-    case "KeyW": move.forward = false; break;
-    case "KeyS": move.backward = false; break;
-    case "KeyA": move.left = false; break;
-    case "KeyD": move.right = false; break;
+    case "KeyW": keyMove.f = 0; break;
+    case "KeyS": keyMove.b = 0; break;
+    case "KeyA": keyMove.l = 0; break;
+    case "KeyD": keyMove.r = 0; break;
   }
 });
 
-const forwardVec = new THREE.Vector3();
-const rightVec = new THREE.Vector3();
-// 走路晃动参数
-let bobTime = 0;
-let stepAccum = 0;
-const BOB_FREQ = 9;      // 步频
-const BOB_AMP_Y = 0.016; // 上下幅度（已调小）
-const BOB_AMP_X = 0.007; // 左右幅度（已调小）
-function updateMovement(delta) {
-  if (DEBUG_ORBIT) { orbitControls.update(); return; }
-  if (!controls.isLocked) return;
-  camera.getWorldDirection(forwardVec);
-  forwardVec.y = 0;
-  forwardVec.normalize();
-  rightVec.crossVectors(forwardVec, camera.up).normalize();
+// ---- 桌面：鼠标看视角（pointer lock）----
+const LOOK_SENS = 0.0022;
+document.addEventListener("mousemove", (e) => {
+  if (document.pointerLockElement !== renderer.domElement) return;
+  yaw -= e.movementX * LOOK_SENS;
+  pitch -= e.movementY * LOOK_SENS;
+  pitch = THREE.MathUtils.clamp(pitch, -PITCH_LIMIT, PITCH_LIMIT);
+});
+document.addEventListener("pointerlockchange", () => {
+  if (started && !isTouch && document.pointerLockElement !== renderer.domElement) {
+    // 用户按 Esc 退出锁定 → 显示提示，可点击重新进入
+    overlay.classList.remove("hidden");
+    crosshair.classList.add("hidden");
+    started = false;
+  }
+});
 
-  const step = MOVE_SPEED * delta;
-  const obj = camera;
-  if (move.forward) obj.position.addScaledVector(forwardVec, step);
-  if (move.backward) obj.position.addScaledVector(forwardVec, -step);
-  if (move.right) obj.position.addScaledVector(rightVec, step);
-  if (move.left) obj.position.addScaledVector(rightVec, -step);
+// ---- 手机：右半屏拖动看视角 ----
+const TOUCH_LOOK_SENS = 0.005;
+let lookTouchId = null, lookLastX = 0, lookLastY = 0;
+// ---- 手机：左侧虚拟摇杆移动 ----
+let joyTouchId = null, joyOriginX = 0, joyOriginY = 0;
+const JOY_RADIUS = 50;
 
-  // ---- 走路头部起伏（head bob）：移动时上下+左右轻微摆动，模拟脚步 ----
-  const moving = move.forward || move.backward || move.left || move.right;
-  if (moving) {
-    bobTime += delta * BOB_FREQ;
-    const bobY = Math.sin(bobTime * 2) * BOB_AMP_Y;       // 竖直：每步两次起伏
-    const bobX = Math.cos(bobTime) * BOB_AMP_X;           // 水平：左右脚交替
-    camera.position.y = START_POS.y + bobY;
-    camera.position.addScaledVector(rightVec, bobX);
-
-    // 每步触发一次脚步声
-    stepAccum += delta * BOB_FREQ;
-    if (stepAccum > Math.PI) {
-      stepAccum -= Math.PI;
-      playFootstep();
+function onTouchStart(e) {
+  if (!started) return;
+  for (const t of e.changedTouches) {
+    const inJoyArea = t.clientX < window.innerWidth * 0.45;
+    if (inJoyArea && joyTouchId === null) {
+      joyTouchId = t.identifier;
+      joyOriginX = t.clientX; joyOriginY = t.clientY;
+    } else if (!inJoyArea && lookTouchId === null) {
+      lookTouchId = t.identifier;
+      lookLastX = t.clientX; lookLastY = t.clientY;
     }
-  } else {
-    // 停下时平滑回到基准高度
-    bobTime = 0;
-    stepAccum = 0;
-    camera.position.y += (START_POS.y - camera.position.y) * Math.min(1, delta * 8);
   }
 }
+function onTouchMove(e) {
+  if (!started) return;
+  for (const t of e.changedTouches) {
+    if (t.identifier === joyTouchId) {
+      let dx = t.clientX - joyOriginX;
+      let dy = t.clientY - joyOriginY;
+      const len = Math.hypot(dx, dy) || 1;
+      const cl = Math.min(len, JOY_RADIUS);
+      const nx = (dx / len) * cl, ny = (dy / len) * cl;
+      stickEl.style.transform = `translate(${nx}px, ${ny}px)`;
+      joyMove.x = nx / JOY_RADIUS;     // 右为正
+      joyMove.z = -ny / JOY_RADIUS;    // 上为前进
+    } else if (t.identifier === lookTouchId) {
+      yaw -= (t.clientX - lookLastX) * TOUCH_LOOK_SENS;
+      pitch -= (t.clientY - lookLastY) * TOUCH_LOOK_SENS;
+      pitch = THREE.MathUtils.clamp(pitch, -PITCH_LIMIT, PITCH_LIMIT);
+      lookLastX = t.clientX; lookLastY = t.clientY;
+    }
+  }
+}
+function onTouchEnd(e) {
+  for (const t of e.changedTouches) {
+    if (t.identifier === joyTouchId) {
+      joyTouchId = null; joyMove.x = 0; joyMove.z = 0;
+      stickEl.style.transform = "translate(0,0)";
+    } else if (t.identifier === lookTouchId) {
+      lookTouchId = null;
+    }
+  }
+}
+window.addEventListener("touchstart", onTouchStart, { passive: false });
+window.addEventListener("touchmove", onTouchMove, { passive: false });
+window.addEventListener("touchend", onTouchEnd);
+window.addEventListener("touchcancel", onTouchEnd);
+listenBtn.addEventListener("click", triggerNearest);
 
-// ----------------- 热点（Book of Kells）-----------------
-// 核心金点
-const hotspotGeo = new THREE.SphereGeometry(0.07, 20, 20);
-const hotspotMat = new THREE.MeshBasicMaterial({ color: 0xffe08a });
-const hotspot = new THREE.Mesh(hotspotGeo, hotspotMat);
-hotspot.position.copy(HOTSPOT_POS);
-hotspot.renderOrder = 999;
-hotspotMat.depthTest = false; // 不被泼溅遮挡，始终可见
-scene.add(hotspot);
+// ===================== 移动 + 走路晃动 + 脚步 =====================
+const forwardVec = new THREE.Vector3();
+const rightVec = new THREE.Vector3();
+let bobTime = 0, stepAccum = 0;
+const BOB_FREQ = 9, BOB_AMP_Y = 0.016, BOB_AMP_X = 0.007;
 
-// 生成一张径向渐变的圆形光晕贴图（避免 Sprite 默认方块）
+function updateMovement(delta) {
+  if (!started) return;
+  applyLook();
+
+  // 水平 forward / right（忽略 pitch）
+  forwardVec.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+  rightVec.set(Math.cos(yaw), 0, -Math.sin(yaw));
+
+  // 合并键盘与摇杆输入
+  let mz = (keyMove.f - keyMove.b) + joyMove.z;
+  let mx = (keyMove.r - keyMove.l) + joyMove.x;
+  mz = THREE.MathUtils.clamp(mz, -1, 1);
+  mx = THREE.MathUtils.clamp(mx, -1, 1);
+
+  const step = MOVE_SPEED * delta;
+  camera.position.addScaledVector(forwardVec, mz * step);
+  camera.position.addScaledVector(rightVec, mx * step);
+
+  const moving = Math.abs(mz) > 0.01 || Math.abs(mx) > 0.01;
+  if (moving) {
+    bobTime += delta * BOB_FREQ;
+    camera.position.y = START_POS.y + Math.sin(bobTime * 2) * BOB_AMP_Y;
+    camera.position.addScaledVector(rightVec, Math.cos(bobTime) * BOB_AMP_X);
+    stepAccum += delta * BOB_FREQ;
+    if (stepAccum > Math.PI) { stepAccum -= Math.PI; playFootstep(); }
+  } else {
+    bobTime = 0; stepAccum = 0;
+    camera.position.y += (START_POS.y - camera.position.y) * Math.min(1, delta * 8);
+  }
+
+  // 活动范围限制
+  camera.position.x = THREE.MathUtils.clamp(camera.position.x, BOUNDS.xMin, BOUNDS.xMax);
+  camera.position.z = THREE.MathUtils.clamp(camera.position.z, BOUNDS.zMin, BOUNDS.zMax);
+}
+
+// ===================== 热点（金点 + 光晕）=====================
 function makeGlowTexture() {
   const size = 128;
   const cv = document.createElement("canvas");
@@ -303,57 +327,45 @@ function makeGlowTexture() {
   grd.addColorStop(0.0, "rgba(255,224,140,1.0)");
   grd.addColorStop(0.3, "rgba(255,208,96,0.6)");
   grd.addColorStop(1.0, "rgba(255,208,96,0.0)");
-  g.fillStyle = grd;
-  g.fillRect(0, 0, size, size);
+  g.fillStyle = grd; g.fillRect(0, 0, size, size);
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
+const glowTex = makeGlowTexture();
 
-// 外层发光光晕（圆形、加法混合）
-const glowMat = new THREE.SpriteMaterial({
-  map: makeGlowTexture(),
-  transparent: true,
-  opacity: 0.9,
-  depthTest: false,
-  depthWrite: false,
-  blending: THREE.AdditiveBlending,
-});
-const glow = new THREE.Sprite(glowMat);
-glow.scale.setScalar(0.55);
-glow.renderOrder = 998;
-hotspot.add(glow);
-
-// 光点呼吸动画
-let hotspotPulse = 0;
-
-const hint = document.getElementById("hint");
-const subtitle = document.getElementById("subtitle");
-const HOTSPOT_RANGE = 2.5;
-let inRange = false;
-let narrationPlaying = false;
-
-// 旁白字幕（与 narration.wav 内容一致，逐句跟随音频）— 取材自 Trinity College Dublin 官网
-// weight 用于按音频时长大致分配每句的显示时间
-const NARRATION_SCRIPT = [
-  { text: "Welcome to the Long Room of the Old Library at Trinity College Dublin.", weight: 1.0 },
-  { text: "Built between 1712 and 1732, this hall is nearly 65 metres long, and houses around 200,000 of the library's oldest books.", weight: 1.9 },
-  { text: "At its heart lies the Book of Kells — a lavishly illuminated manuscript of the four Gospels, created by monks around the year 800.", weight: 1.9 },
-  { text: "It is regarded as one of Ireland's greatest cultural treasures, and a masterpiece of insular illumination.", weight: 1.4 },
-];
-
-let subtitleTimers = [];
-function clearSubtitleTimers() {
-  subtitleTimers.forEach((t) => clearTimeout(t));
-  subtitleTimers = [];
+function buildHotspot(hs) {
+  const geo = new THREE.SphereGeometry(0.07, 20, 20);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffe08a });
+  mat.depthTest = false;
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.copy(hs.pos);
+  mesh.renderOrder = 999;
+  const glowMat = new THREE.SpriteMaterial({
+    map: glowTex, transparent: true, opacity: 0.9,
+    depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+  const glow = new THREE.Sprite(glowMat);
+  glow.scale.setScalar(0.55);
+  glow.renderOrder = 998;
+  mesh.add(glow);
+  scene.add(mesh);
+  hs.mesh = mesh;
 }
+HOTSPOTS.forEach(buildHotspot);
 
-// 按音频总时长把字幕逐句排布（逼近语音节奏，无障碍同步）
-function startSubtitleTimeline(durationSec) {
+let hotspotPulse = 0;
+let narrationPlaying = false;
+let nearestHotspot = null;
+
+// ===================== 字幕 =====================
+let subtitleTimers = [];
+function clearSubtitleTimers() { subtitleTimers.forEach(clearTimeout); subtitleTimers = []; }
+function startSubtitleTimeline(script, durationSec) {
   clearSubtitleTimers();
-  const totalWeight = NARRATION_SCRIPT.reduce((s, l) => s + l.weight, 0);
+  const totalWeight = script.reduce((s, l) => s + l.weight, 0);
   let elapsed = 0;
-  NARRATION_SCRIPT.forEach((line) => {
+  script.forEach((line) => {
     const at = elapsed;
     subtitleTimers.push(setTimeout(() => {
       subtitle.textContent = line.text;
@@ -361,73 +373,70 @@ function startSubtitleTimeline(durationSec) {
     }, at * 1000));
     elapsed += (line.weight / totalWeight) * durationSec;
   });
-  // 结束后隐藏字幕、解锁
   subtitleTimers.push(setTimeout(() => {
     subtitle.classList.remove("show");
     narrationPlaying = false;
   }, durationSec * 1000 + 400));
 }
 
-function tryTriggerHotspot() {
-  if (!inRange || narrationPlaying) return;
+function triggerNearest() {
+  if (narrationPlaying || !nearestHotspot) return;
   narrationPlaying = true;
-  playNarration(); // 加载并播放 narration.wav（空间定位 + 大教堂混响）
+  playNarration(nearestHotspot);
 }
 
-// ----------------- 音频：空间环境音 + 卷积混响 -----------------
-let listener, ambientSource, narrationSource, convolver;
+// ===================== 音频 =====================
+let listener, convolver;
 let audioReady = false;
-
-let convolverReady = false;
 
 function initAudio() {
   if (audioReady) return;
   audioReady = true;
-
   listener = new THREE.AudioListener();
   camera.add(listener);
   const ctx = listener.context;
+  if (ctx.state === "suspended") ctx.resume();
 
-  // 卷积混响：加载真实测量的大教堂脉冲响应（ir.wav）
   convolver = ctx.createConvolver();
   loadOrGenerateIR(ctx).then((buf) => {
     convolver.buffer = buf;
     convolver.connect(ctx.destination);
-    convolverReady = true;
   });
 
-  // 旁白：空间定位音源，放在热点（《凯尔经》）位置，经过混响
-  narrationSource = new THREE.PositionalAudio(listener);
-  narrationSource.setRefDistance(3);
-  narrationSource.setRolloffFactor(1.0);
-  narrationSource.setDistanceModel("inverse");
-  hotspot.add(narrationSource);
+  // 每个热点一个空间定位音源，经过混响
+  HOTSPOTS.forEach((hs) => {
+    const src = new THREE.PositionalAudio(listener);
+    src.setRefDistance(3);
+    src.setRolloffFactor(1.0);
+    src.setDistanceModel("inverse");
+    hs.mesh.add(src);
+    hs.narrationSource = src;
+  });
 }
 
-function playNarration() {
+function playNarration(hs) {
   initAudio();
   const ctx = listener.context;
-  fetch(NARRATION_URL)
-    .then((r) => { if (!r.ok) throw new Error("no narration file"); return r.arrayBuffer(); })
+  fetch(hs.audio)
+    .then((r) => { if (!r.ok) throw new Error("no narration"); return r.arrayBuffer(); })
     .then((data) => ctx.decodeAudioData(data))
     .then((buf) => {
-      narrationSource.setBuffer(buf);
-      narrationSource.setVolume(1.0);
-      // 把空间音源输出接入混响链（panner -> convolver -> 输出）
-      narrationSource.getOutput().disconnect();
-      narrationSource.getOutput().connect(convolver);
-      convolver.connect(ctx.destination); // 幂等：确保混响已接到输出
-      narrationSource.play();
-      startSubtitleTimeline(buf.duration);
+      const src = hs.narrationSource;
+      if (src.isPlaying) src.stop();
+      src.setBuffer(buf);
+      src.setVolume(1.0);
+      src.getOutput().disconnect();
+      src.getOutput().connect(convolver);
+      convolver.connect(ctx.destination);
+      src.play();
+      startSubtitleTimeline(hs.script, buf.duration);
     })
     .catch(() => {
-      // 没有旁白文件时：占位竖琴音 + 字幕仍按 ~8 秒走
       playPlaceholderChime(ctx);
-      startSubtitleTimeline(8);
+      startSubtitleTimeline(hs.script, 8);
     });
 }
 
-// 程序生成的脚步声：短促低频噪声脉冲，经过混响（有空间感）
 function playFootstep() {
   if (!audioReady || !convolver || !listener) return;
   const ctx = listener.context;
@@ -436,79 +445,41 @@ function playFootstep() {
   const d = buf.getChannelData(0);
   for (let i = 0; i < d.length; i++) {
     const t = i / d.length;
-    d[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 4); // 快速衰减的"咚"
+    d[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 4);
   }
   const src = ctx.createBufferSource();
   src.buffer = buf;
   const lp = ctx.createBiquadFilter();
-  lp.type = "lowpass";
-  lp.frequency.value = 380 + Math.random() * 120; // 每步略微变化更自然
-  const g = ctx.createGain();
-  g.gain.value = 0.22 + Math.random() * 0.06;
-  src.connect(lp);
-  lp.connect(g);
-  g.connect(convolver);            // 过大教堂混响
-  convolver.connect(ctx.destination); // 幂等
-  g.connect(ctx.destination);      // 叠一点干声，确保踩地声清晰
-  src.start();
-  src.stop(ctx.currentTime + dur);
+  lp.type = "lowpass"; lp.frequency.value = 380 + Math.random() * 120;
+  const g = ctx.createGain(); g.gain.value = 0.20 + Math.random() * 0.06;
+  src.connect(lp); lp.connect(g);
+  g.connect(convolver); convolver.connect(ctx.destination);
+  g.connect(ctx.destination);
+  src.start(); src.stop(ctx.currentTime + dur);
 }
 
 function playPlaceholderChime(ctx) {
   const now = ctx.currentTime;
-  const notes = [392.0, 493.88, 587.33, 783.99]; // G4 B4 D5 G5 harp-ish arpeggio
+  const notes = [392.0, 493.88, 587.33, 783.99];
   notes.forEach((freq, i) => {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    osc.type = "triangle";
-    osc.frequency.value = freq;
+    osc.type = "triangle"; osc.frequency.value = freq;
     gain.gain.setValueAtTime(0, now + i * 0.18);
     gain.gain.linearRampToValueAtTime(0.25, now + i * 0.18 + 0.02);
     gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.18 + 1.6);
     osc.connect(gain);
-    gain.connect(convolver);
-    convolver.connect(ctx.destination);
-    osc.start(now + i * 0.18);
-    osc.stop(now + i * 0.18 + 1.7);
+    gain.connect(convolver); convolver.connect(ctx.destination);
+    osc.start(now + i * 0.18); osc.stop(now + i * 0.18 + 1.7);
   });
 }
 
-function loadOrGenerateAmbient(ctx) {
-  // 尝试加载真实环境音；失败则生成一段低频环境噪声(粉红噪声 + 低通)
-  return fetch("ambient.wav")
-    .then((r) => { if (!r.ok) throw new Error("no ambient"); return r.arrayBuffer(); })
-    .then((data) => ctx.decodeAudioData(data))
-    .catch(() => generatePinkNoiseBuffer(ctx, 4));
-}
-
-function generatePinkNoiseBuffer(ctx, seconds) {
-  const length = ctx.sampleRate * seconds;
-  const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
-  for (let i = 0; i < length; i++) {
-    const white = Math.random() * 2 - 1;
-    b0 = 0.99886*b0 + white*0.0555179;
-    b1 = 0.99332*b1 + white*0.0750759;
-    b2 = 0.96900*b2 + white*0.1538520;
-    b3 = 0.86650*b3 + white*0.3104856;
-    b4 = 0.55000*b4 + white*0.5329522;
-    b5 = -0.7616*b5 - white*0.0168980;
-    let pink = b0+b1+b2+b3+b4+b5+b6+white*0.5362;
-    b6 = white*0.115926;
-    data[i] = pink * 0.04; // 很轻的环境底噪
-  }
-  return buffer;
-}
-
 function loadOrGenerateIR(ctx) {
-  // 尝试加载真实脉冲响应；失败则生成一段大厅风格的合成混响尾巴
   return fetch(IR_URL)
     .then((r) => { if (!r.ok) throw new Error("no ir"); return r.arrayBuffer(); })
     .then((data) => ctx.decodeAudioData(data))
     .catch(() => generateSyntheticIR(ctx, 3.2));
 }
-
 function generateSyntheticIR(ctx, durationSec) {
   const length = Math.floor(ctx.sampleRate * durationSec);
   const buffer = ctx.createBuffer(2, length, ctx.sampleRate);
@@ -516,37 +487,64 @@ function generateSyntheticIR(ctx, durationSec) {
     const data = buffer.getChannelData(ch);
     for (let i = 0; i < length; i++) {
       const t = i / length;
-      const decay = Math.pow(1 - t, 2.5); // 长尾衰减，模拟大型石砌厅堂
-      data[i] = (Math.random() * 2 - 1) * decay;
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 2.5);
     }
   }
   return buffer;
 }
 
-// ----------------- 主循环 -----------------
-const clock = new THREE.Clock();
+// ===================== 临时定位工具（仅键盘，发布隐藏屏显）=====================
+const coordEl = document.createElement("div");
+coordEl.style.cssText = "position:fixed;top:10px;left:10px;color:#0f0;font:13px monospace;background:rgba(0,0,0,0.6);padding:6px 10px;z-index:30;white-space:pre;";
+const SHOW_TOOLS = false; // 调试边界时显示；调好后改回 false
+if (SHOW_TOOLS) { document.body.appendChild(coordEl); coordEl.textContent = "走到活动区边角，按 B 记录；N 清空"; }
+let boundPts = [];
+function recordBound() {
+  boundPts.push([camera.position.x, camera.position.z]);
+  const xs = boundPts.map((p) => p[0]), zs = boundPts.map((p) => p[1]);
+  coordEl.textContent =
+    "BOUNDS  (pts: " + boundPts.length + ")\n" +
+    "xMin: " + Math.min(...xs).toFixed(2) + "  xMax: " + Math.max(...xs).toFixed(2) + "\n" +
+    "zMin: " + Math.min(...zs).toFixed(2) + "  zMax: " + Math.max(...zs).toFixed(2);
+}
+function recordSpawn() {
+  const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+  const p = camera.position, look = p.clone().add(dir);
+  coordEl.textContent =
+    "START_POS = (" + p.x.toFixed(2) + ", " + p.y.toFixed(2) + ", " + p.z.toFixed(2) + ")\n" +
+    "LOOK_AT  = (" + look.x.toFixed(2) + ", " + look.y.toFixed(2) + ", " + look.z.toFixed(2) + ")";
+}
 
+// ===================== 主循环 =====================
+const clock = new THREE.Clock();
+const listenText = isTouch ? "Tap “Listen”" : "Press E to listen";
 function animate() {
   requestAnimationFrame(animate);
   const delta = Math.min(clock.getDelta(), 0.1);
-
   updateMovement(delta);
 
-  // 热点呼吸动画 + 距离检测
   hotspotPulse += delta;
   const s = 1 + 0.15 * Math.sin(hotspotPulse * 3);
-  hotspot.scale.setScalar(s);
 
-  const dist = camera.position.distanceTo(HOTSPOT_POS);
-  inRange = dist < HOTSPOT_RANGE;
-  hint.textContent = inRange ? "按 E：聆听《凯尔经》的故事" : "";
+  // 找最近的、在范围内的热点
+  nearestHotspot = null;
+  let bestDist = Infinity;
+  for (const hs of HOTSPOTS) {
+    hs.mesh.scale.setScalar(s);
+    const d = camera.position.distanceTo(hs.pos);
+    if (d < hs.range && d < bestDist) { bestDist = d; nearestHotspot = hs; }
+  }
+
+  if (started && nearestHotspot && !narrationPlaying) {
+    hint.textContent = listenText + " · " + nearestHotspot.name;
+    if (isTouch) listenBtn.classList.add("show");
+  } else {
+    hint.textContent = "";
+    listenBtn.classList.remove("show");
+  }
 
   renderer.render(scene, camera);
 }
-
-// 首次交互时初始化音频（浏览器策略要求用户手势）
-overlay.addEventListener("click", initAudio, { once: true });
-
 animate();
 </script>
 </body>
